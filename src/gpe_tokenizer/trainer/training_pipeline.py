@@ -5,23 +5,24 @@ import pickle
 import time
 from tqdm.auto import tqdm
 import numpy as np
-from collections import defaultdict
+from collections import Counter
 import logging
+import itertools
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 class SinhalaGPETokenizerTrainer:
 
-    def __init__(self, dataset_size, num_merges, filepath=None, dataset=None, output_dir="models"):
+    def __init__(self, dataset_size, vocab_size, filepath=None, dataset=None, output_dir="src/gpe_tokenizer/models"):
         self.DUMMY_PREFIX = " "
         self.DATASET_SIZE = dataset_size
-        self.NUM_MERGES = num_merges
+        self.VOCAB_SIZE = vocab_size
         self.start_time = time.time()
         self.vocab = {}
         self.vocab_re = {}
         self.merges = {}
-        self.grapheme_cache = {}
         self.output_dir = output_dir
 
         if filepath and dataset:
@@ -35,45 +36,72 @@ class SinhalaGPETokenizerTrainer:
 
         self.lines = self.lines[:self.DATASET_SIZE]
 
-    # ------------------------
-    # Utilities
-    # ------------------------
-    def elapsed_time(self):
-        td = time.time() - self.start_time
-        days, rem = divmod(td, 86400)
-        hrs, rem = divmod(rem, 3600)
-        mins, secs = divmod(rem, 60)
-        return int(days), int(hrs), int(mins), int(secs)
+    def calculate_elapsed_time(self):
+        end_time = time.time()
+        td = end_time - self.start_time
+        days, remainder = divmod(td, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return int(days), int(hours), int(minutes), int(seconds)
 
-    def save_pickle(self, obj, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'wb') as f:
-            pickle.dump(obj, f)
+    def save_pickle(self, dictionary, file_path):
+        with open(file_path, 'wb') as file:
+            pickle.dump(dictionary, file)
+
+    def save_models(self):
+        self.save_pickle(self.vocab, os.path.join(self.output_dir, "vocab.pkl"))
+        self.save_pickle(self.vocab_re, os.path.join(self.output_dir, "vocab_re.pkl"))
+        self.save_pickle(self.merges, os.path.join(self.output_dir, "merges.pkl"))
+
+
+    def merge(self, ids, pair, idx):
+        # Early exit if pair not in ids
+        if pair[0] not in ids or pair[1] not in ids:
+            return ids
+
+        new_ids = []
+        i = 0
+        while i < len(ids):
+            if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
+                new_ids.append(idx)
+                i += 2
+            else:
+                new_ids.append(ids[i])
+                i += 1
+        return new_ids
+    
+
+    def get_stats(self, ids_list):
+        counts = Counter()
+        for ids in ids_list:
+            counts.update(zip(ids, ids[1:]))
+        return counts
 
     # ------------------------
     # Grapheme tokenization with caching
     # ------------------------
-    def tokenize_graphemes(self, word):
-        if word in self.grapheme_cache:
-            return self.grapheme_cache[word]
-        tokens = list(grapheme.graphemes(word))
-        self.grapheme_cache[word] = tokens
-        return tokens
+    def tokenize_graphemes(self, text):
+        """Return list of graphemes for a word."""
+        return list(grapheme.graphemes(text))
 
     # ------------------------
     # Build initial vocab
     # ------------------------
     def build_vocab(self):
-        self.graphemes_list = []
-        for line in tqdm(self.lines, desc="Building vocab"):
-            words = line.split()
-            for word in words:
-                for g in self.tokenize_graphemes(word):
-                    if g not in self.vocab_re:
-                        idx = len(self.graphemes_list)
-                        self.graphemes_list.append(g)
-                        self.vocab[idx] = g
-                        self.vocab_re[g] = idx
+        # Flatten all graphemes in corpus
+        all_graphemes = itertools.chain.from_iterable(
+            self.tokenize_graphemes(word)
+            for line in self.lines
+            for word in line.split()
+        )
+        
+        # Count frequency (optional, if you want sorted vocab)
+        counts = Counter(all_graphemes)
+        
+        self.graphemes_list = list(counts.keys())
+        self.vocab = {i: g for i, g in enumerate(self.graphemes_list)}
+        self.vocab_re = {g: i for i, g in enumerate(self.graphemes_list)}
+        
         logger.info(f"Initial vocab size: {len(self.vocab)}")
 
     # ------------------------
@@ -84,33 +112,9 @@ class SinhalaGPETokenizerTrainer:
         for line in tqdm(self.lines, desc="Converting text to IDs"):
             words = line.split()
             for word in words:
-                ids = [self.vocab_re[g] for g in self.tokenize_graphemes(word)]
-                self.ids_list.append(np.array(ids, dtype=np.int32))
+                self.ids_list.append([self.vocab_re[g] for g in self.tokenize_graphemes(word)])
 
-    # ------------------------
-    # Incremental BPE
-    # ------------------------
-    def get_pair_counts(self):
-        pair_counts = defaultdict(int)
-        pair_positions = defaultdict(list)
-        for seq_idx, seq in enumerate(self.ids_list):
-            if len(seq) < 2:
-                continue
-            for i in range(len(seq) - 1):
-                pair = (seq[i], seq[i + 1])
-                pair_counts[pair] += 1
-                pair_positions[pair].append((seq_idx, i))
-        return pair_counts, pair_positions
 
-    def merge_pair(self, pair, idx, pair_positions):
-        for seq_idx, pos in pair_positions[pair]:
-            seq = self.ids_list[seq_idx]
-            if pos >= len(seq) - 1:
-                continue
-            if seq[pos] == pair[0] and seq[pos + 1] == pair[1]:
-                seq[pos] = idx
-                self.ids_list[seq_idx] = np.delete(seq, pos + 1)
-        del pair_positions[pair]
 
     # ------------------------
     # Train BPE
@@ -119,41 +123,38 @@ class SinhalaGPETokenizerTrainer:
         self.build_vocab()
         self.convert_to_ids()
 
-        pbar = tqdm(total=self.NUM_MERGES, desc="BPE merges")
-        for i in range(self.NUM_MERGES):
-            pair_counts, pair_positions = self.get_pair_counts()
-            if not pair_counts:
-                logger.info("No more pairs to merge!")
+        merges = {}
+
+        for i in range(self.VOCAB_SIZE):
+            stats = self.get_stats(self.ids_list)
+            if not stats:
+                print("No more pairs to merge!")
                 break
 
-            # Most frequent pair
-            pair = max(pair_counts, key=pair_counts.get)
-            count = pair_counts[pair]
-
-            # Skip rare pairs
-            if count < 2:
-                logger.info("Skipping rare pair with count < 2")
-                continue
+            # Get the most frequent pair
+            pair = max(stats, key=stats.get)
+            count = stats[pair]
 
             # Mint new token
             idx = len(self.vocab)
-            self.merges[pair] = idx
+
+            # Merge in all sequences
+            ids_list = [self.merge(ids, pair, idx) for ids in self.ids_list]
+
+            # Update vocab and merges
+            merges[pair] = idx
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
             self.vocab_re[self.vocab[idx]] = idx
 
-            self.merge_pair(pair, idx, pair_positions)
+            print(f"merge {i + 1}/{self.VOCAB_SIZE}: {self.vocab[pair[0]]} + {self.vocab[pair[1]]} -> {self.vocab[idx]} had {count} occurrences")
 
-            tqdm.write(f"merge {i+1}/{self.NUM_MERGES}: {self.vocab[pair[0]]}+{self.vocab[pair[1]]} -> {self.vocab[idx]} | freq={count}")
-            pbar.update()
 
-        days, hrs, mins = self.elapsed_time()
-        logger.info(f"Training finished in {days}d {hrs}h {mins}m")
+        days, hrs, mins, secs = self.calculate_elapsed_time()
+        logger.info(f"Training finished in {days}d {hrs}h {mins}m {secs}s")
 
         # ------------------------
         # Save
-        self.save_pickle(self.vocab, os.path.join(self.output_dir, "vocab.pkl"))
-        self.save_pickle(self.vocab_re, os.path.join(self.output_dir, "vocab_re.pkl"))
-        self.save_pickle(self.merges, os.path.join(self.output_dir, "merges.pkl"))
+        self.save_models()
         logger.info("Dictionaries saved.")
 
 # ------------------------
@@ -164,9 +165,8 @@ if __name__ == "__main__":
     dataset = load_dataset("polyglots/MADLAD_CulturaX_cleaned", split="train")["text"]
 
     trainer = SinhalaGPETokenizerTrainer(
-        dataset_size=5000000,
-        num_merges=32000,
-        dataset=dataset,
-        output_dir="./models"
+        dataset_size=5_000_000,
+        vocab_size=32_000,
+        dataset=dataset
     )
     trainer.train()
