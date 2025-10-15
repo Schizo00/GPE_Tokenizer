@@ -8,6 +8,8 @@ import numpy as np
 from collections import Counter
 import logging
 import itertools
+from multiprocessing import Pool, cpu_count
+
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ class SinhalaGPETokenizerTrainer:
         self.vocab = {}
         self.vocab_re = {}
         self.merges = {}
+        self.graphemes_list = []
         self.output_dir = output_dir
 
         if filepath and dataset:
@@ -53,6 +56,10 @@ class SinhalaGPETokenizerTrainer:
         self.save_pickle(self.vocab_re, os.path.join(self.output_dir, "vocab_re.pkl"))
         self.save_pickle(self.merges, os.path.join(self.output_dir, "merges.pkl"))
 
+    def merge_wrapper(self, args):
+        ids, pair, idx = args
+        # Assuming `self.merge` is a method; you can pass the object if needed
+        return self.merge(ids, pair, idx) 
 
     def merge(self, ids, pair, idx):
         # Early exit if pair not in ids
@@ -69,6 +76,16 @@ class SinhalaGPETokenizerTrainer:
                 new_ids.append(ids[i])
                 i += 1
         return new_ids
+    
+
+    def multiprocess_merge(self, pair, idx):
+        # Prepare arguments for each item in ids_list
+        args_list = [(ids, pair, idx) for ids in self.ids_list]
+
+        # Use a pool of workers
+        with Pool(cpu_count()) as pool:
+            # Map the merge function across all inputs
+            self.ids_list = pool.map(self.merge_wrapper, args_list)
     
 
     def get_stats(self, ids_list):
@@ -88,19 +105,16 @@ class SinhalaGPETokenizerTrainer:
     # Build initial vocab
     # ------------------------
     def build_vocab(self):
-        # Flatten all graphemes in corpus
-        all_graphemes = itertools.chain.from_iterable(
-            self.tokenize_graphemes(word)
-            for line in tqdm(self.lines, desc="Building initial vocab")
-            for word in line.split()
-        )
-        
-        # Count frequency (optional, if you want sorted vocab)
-        counts = Counter(all_graphemes)
-        
-        self.graphemes_list = list(counts.keys())
-        self.vocab = {i: g for i, g in enumerate(self.graphemes_list)}
-        self.vocab_re = {g: i for i, g in enumerate(self.graphemes_list)}
+        for line in tqdm(self.lines, desc="Building vocab"):
+            words = line.split()
+            for word in words:
+                for g in self.tokenize_graphemes(word):
+                    if g not in self.vocab_re:
+                        idx = len(self.graphemes_list)
+                        self.graphemes_list.append(g)
+                        self.vocab[idx] = g
+                        self.vocab_re[g] = idx
+
         
         logger.info(f"Initial vocab size: {len(self.vocab)}")
 
@@ -140,7 +154,8 @@ class SinhalaGPETokenizerTrainer:
             idx = len(self.vocab)
 
             # Merge in all sequences
-            self.ids_list = [self.merge(ids, pair, idx) for ids in self.ids_list]
+            # self.ids_list = [self.multiprocess_merge(ids, pair, idx) for ids in self.ids_list]
+            self.multiprocess_merge(pair, idx)
 
             # Update vocab and merges
             self.merges[pair] = idx
