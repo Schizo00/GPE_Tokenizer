@@ -91,7 +91,7 @@ class SinhalaGPETokenizerTrainer:
         # Flatten all graphemes in corpus
         all_graphemes = itertools.chain.from_iterable(
             self.tokenize_graphemes(word)
-            for line in self.lines
+            for line in tqdm(self.lines, desc="Building initial vocab")
             for word in line.split()
         )
         
@@ -120,12 +120,13 @@ class SinhalaGPETokenizerTrainer:
     # Train BPE
     # ------------------------
     def train(self):
+        logger.info("Starting training...")
         self.build_vocab()
         self.convert_to_ids()
 
-        merges = {}
+        self.merges = {}
 
-        for i in range(self.VOCAB_SIZE):
+        for i in tqdm(range(self.VOCAB_SIZE), desc="Training BPE"):
             stats = self.get_stats(self.ids_list)
             if not stats:
                 print("No more pairs to merge!")
@@ -139,10 +140,10 @@ class SinhalaGPETokenizerTrainer:
             idx = len(self.vocab)
 
             # Merge in all sequences
-            ids_list = [self.merge(ids, pair, idx) for ids in self.ids_list]
+            self.ids_list = [self.merge(ids, pair, idx) for ids in self.ids_list]
 
             # Update vocab and merges
-            merges[pair] = idx
+            self.merges[pair] = idx
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
             self.vocab_re[self.vocab[idx]] = idx
 
@@ -165,8 +166,8 @@ if __name__ == "__main__":
     dataset = load_dataset("polyglots/MADLAD_CulturaX_cleaned", split="train")["text"]
 
     trainer = SinhalaGPETokenizerTrainer(
-        dataset_size=5_000_000,
-        vocab_size=32_000,
+        dataset_size=1_000_000,
+        vocab_size=5_000,
         dataset=dataset
     )
     trainer.train()
