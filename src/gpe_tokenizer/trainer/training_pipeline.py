@@ -13,6 +13,7 @@ from multiprocessing import Pool, cpu_count
 
 
 
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -64,27 +65,22 @@ class SinhalaGPETokenizerTrainer:
         # Assuming `self.merge` is a method; you can pass the object if needed
         return self.merge(ids, pair, idx) 
 
-    def merge(self, ids, pair, idx):
-        """
-        ids_lists: list of lists of ids
-        pair: tuple to merge, e.g., (1,2)
-        idx: new id to replace the pair
-        lists_map: dict mapping bigram -> set of list indices where it occurs
-        """
-        if pair not in self.lists_map:
-            return  # nothing to merge
-
-        new_ids = []
-        i = 0
-        while i < len(self.ids_list[ids]):
-            if i < len(self.ids_list[ids]) - 1 and self.ids_list[ids][i] == pair[0] and self.ids_list[ids][i + 1] == pair[1]:
-                new_ids.append(idx)
-                i += 2  # skip the pair
-            else:
-                new_ids.append(self.ids_list[ids][i])
-                i += 1
-                
-            self.ids_list[ids] = new_ids  # update only this list
+    # def merge(self, ids_idx, pair, new_id):
+    #     seq = self.ids_list[ids_idx]
+    #     new_seq = []
+    #     changed = False
+    #     i = 0
+    #     while i < len(seq):
+    #         if i < len(seq)-1 and seq[i] == pair[0] and seq[i+1] == pair[1]:
+    #             new_seq.append(new_id)
+    #             i += 2
+    #             changed = True
+    #         else:
+    #             new_seq.append(seq[i])
+    #             i += 1
+    #     if changed:
+    #         self.ids_list[ids_idx] = new_seq
+    #         self._updated_lists.add(ids_idx)
 
 
         
@@ -99,19 +95,88 @@ class SinhalaGPETokenizerTrainer:
     #         self.ids_list = pool.map(self.merge_wrapper, args_list)
     
 
+
+    # def get_stats(self, ids_list):
+    #     self.counts = Counter() 
+        
+    #     for list_idx, ids in enumerate(tqdm(ids_list, desc="Counting bigrams", leave=False)):
+    #         # Create bigrams using zip 
+    #         bigrams = zip(ids, ids[1:]) 
+    #         self.counts.update(bigrams) # count all bigrams in this list 
+            
+    #         # Track which list each bigram appears in 
+    #         for pair in set(zip(ids, ids[1:])): # use set to avoid duplicates in same list
+    #             self.lists_map[pair].add(list_idx) 
+            
+    #     return self.counts
+
+    def merge(self, ids, pair, idx):
+        """
+        Merge a bigram pair in a sequence and mark the sequence as updated for get_stats().
+        """
+        seq = self.ids_list[ids]
+        new_ids = []
+        changed = False
+        i = 0
+        while i < len(seq):
+            if i < len(seq) - 1 and seq[i] == pair[0] and seq[i + 1] == pair[1]:
+                new_ids.append(idx)
+                i += 2
+                changed = True
+            else:
+                new_ids.append(seq[i])
+                i += 1
+
+        if changed:
+            if not hasattr(self, "_prev_seqs"):
+                self._prev_seqs = {}
+            # Store the old sequence before replacing
+            self._prev_seqs[ids] = seq.copy()
+            self.ids_list[ids] = new_ids
+            if not hasattr(self, "_updated_lists"):
+                self._updated_lists = set()
+            self._updated_lists.add(ids)
+
+
     def get_stats(self, ids_list):
+        """
+        Incrementally calculate bigram counts.
+        Only recompute sequences that changed since the last merge.
+        """
+        if not hasattr(self, "_updated_lists"):
+            # First call: all sequences are updated
+            self._updated_lists = set(range(len(ids_list)))
+            self.counts = Counter()
+            self.lists_map = defaultdict(set)
+            self._prev_seqs = {}
 
-        self.counts = Counter()
+        # Remove old bigrams for updated lists
+        for list_idx in self._updated_lists:
+            old_seq = self._prev_seqs.get(list_idx, ids_list[list_idx])
+            old_bigrams = list(zip(old_seq, old_seq[1:]))
+            for bg in old_bigrams:
+                if bg in self.counts:
+                    self.counts[bg] -= 1
+                    if self.counts[bg] <= 0:
+                        del self.counts[bg]
+                self.lists_map[bg].discard(list_idx)
+                if not self.lists_map[bg]:
+                    del self.lists_map[bg]
 
-        for list_idx, ids in enumerate(tqdm(ids_list, desc="Counting bigrams", leave=False)):
-            # Create bigrams using zip
-            bigrams = zip(ids, ids[1:])
-            self.counts.update(bigrams)  # count all bigrams in this list
-            # Track which list each bigram appears in
-            for pair in set(zip(ids, ids[1:])):  # use set to avoid duplicates in same list
-                self.lists_map[pair].add(list_idx)
+        # Recount bigrams for updated lists
+        for list_idx in tqdm(self._updated_lists, desc="Counting bigrams", leave=False):
+            seq = ids_list[list_idx]
+            bigrams = list(zip(seq, seq[1:]))
+            self.counts.update(bigrams)
+            for bg in set(bigrams):
+                self.lists_map[bg].add(list_idx)
+
+        # Clear tracking for next merge
+        self._updated_lists = set()
+        self._prev_seqs = {}
 
         return self.counts
+
 
 
     # ------------------------
