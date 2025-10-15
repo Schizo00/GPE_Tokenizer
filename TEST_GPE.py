@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 # ------------------------
 # Config
 # ------------------------
-OUTPUT_DIR = r"D:\My Studies\Research\Tokenization\LAT\train\indic_merges"
+OUTPUT_DIR = r"src/gpe_tokenizer/models"
 
 # ------------------------
 # Load pickled files

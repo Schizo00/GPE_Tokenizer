@@ -278,8 +278,8 @@ if __name__ == "__main__":
     dataset = load_dataset("polyglots/MADLAD_CulturaX_cleaned", split="train")["text"]
 
     trainer = SinhalaGPETokenizerTrainer(
-        dataset_size=10_000_00,
-        vocab_size=5_000,
+        dataset_size=5_000_000,
+        vocab_size=16_000,
         dataset=dataset
     )
     trainer.train()
