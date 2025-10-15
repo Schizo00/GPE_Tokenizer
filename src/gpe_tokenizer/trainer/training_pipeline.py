@@ -5,10 +5,11 @@ import pickle
 import time
 from tqdm.auto import tqdm
 import numpy as np
-from collections import Counter
+from collections import Counter, defaultdict
 import logging
 import itertools
 from multiprocessing import Pool, cpu_count
+
 
 
 
@@ -26,7 +27,9 @@ class SinhalaGPETokenizerTrainer:
         self.vocab_re = {}
         self.merges = {}
         self.graphemes_list = []
+        self.lists_map = defaultdict(set)
         self.output_dir = output_dir
+        self.counts = Counter()
 
         if filepath and dataset:
             raise ValueError("Provide either filepath or dataset, not both.")
@@ -62,37 +65,54 @@ class SinhalaGPETokenizerTrainer:
         return self.merge(ids, pair, idx) 
 
     def merge(self, ids, pair, idx):
-        # Early exit if pair not in ids
-        if pair[0] not in ids or pair[1] not in ids:
-            return ids
+        """
+        ids_lists: list of lists of ids
+        pair: tuple to merge, e.g., (1,2)
+        idx: new id to replace the pair
+        lists_map: dict mapping bigram -> set of list indices where it occurs
+        """
+        if pair not in self.lists_map:
+            return  # nothing to merge
 
         new_ids = []
         i = 0
-        while i < len(ids):
-            if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
+        while i < len(self.ids_list[ids]):
+            if i < len(self.ids_list[ids]) - 1 and self.ids_list[ids][i] == pair[0] and self.ids_list[ids][i + 1] == pair[1]:
                 new_ids.append(idx)
-                i += 2
+                i += 2  # skip the pair
             else:
-                new_ids.append(ids[i])
+                new_ids.append(self.ids_list[ids][i])
                 i += 1
-        return new_ids
-    
+                
+            self.ids_list[ids] = new_ids  # update only this list
 
-    def multiprocess_merge(self, pair, idx):
-        # Prepare arguments for each item in ids_list
-        args_list = [(ids, pair, idx) for ids in self.ids_list]
 
-        # Use a pool of workers
-        with Pool(cpu_count()) as pool:
-            # Map the merge function across all inputs
-            self.ids_list = pool.map(self.merge_wrapper, args_list)
+        
+
+    # def multiprocess_merge(self, pair, idx):
+    #     # Prepare arguments for each item in ids_list
+    #     args_list = [(ids, pair, idx) for ids in self.ids_list]
+
+    #     # Use a pool of workers
+    #     with Pool(cpu_count()) as pool:
+    #         # Map the merge function across all inputs
+    #         self.ids_list = pool.map(self.merge_wrapper, args_list)
     
 
     def get_stats(self, ids_list):
-        counts = Counter()
-        for ids in ids_list:
-            counts.update(zip(ids, ids[1:]))
-        return counts
+
+        self.counts = Counter()
+
+        for list_idx, ids in enumerate(tqdm(ids_list, desc="Counting bigrams", leave=False)):
+            # Create bigrams using zip
+            bigrams = zip(ids, ids[1:])
+            self.counts.update(bigrams)  # count all bigrams in this list
+            # Track which list each bigram appears in
+            for pair in set(zip(ids, ids[1:])):  # use set to avoid duplicates in same list
+                self.lists_map[pair].add(list_idx)
+
+        return self.counts
+
 
     # ------------------------
     # Grapheme tokenization with caching
@@ -138,6 +158,8 @@ class SinhalaGPETokenizerTrainer:
         self.build_vocab()
         self.convert_to_ids()
 
+        del self.lines # Free up memory
+
         self.merges = {}
 
         for i in tqdm(range(self.VOCAB_SIZE), desc="Training BPE"):
@@ -154,15 +176,25 @@ class SinhalaGPETokenizerTrainer:
             idx = len(self.vocab)
 
             # Merge in all sequences
-            # self.ids_list = [self.multiprocess_merge(ids, pair, idx) for ids in self.ids_list]
-            self.multiprocess_merge(pair, idx)
+            # [self.merge(ids, pair, idx) for ids in tqdm(self.lists_map[pair], desc="Merging pairs", leave=False)]
+
+            merge_bar = tqdm(total=len(self.lists_map[pair]), desc="Merging pair", leave=False)
+
+            for ids in list(self.lists_map[pair]):
+                self.merge(ids, pair, idx)
+                merge_bar.update(1)
+
+            merge_bar.close()
+            # self.multiprocess_merge(pair, idx)
+            
+            self.lists_map[pair].pop() # Pop the pair from lists map since its not needed anymore
 
             # Update vocab and merges
             self.merges[pair] = idx
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
             self.vocab_re[self.vocab[idx]] = idx
 
-            print(f"merge {i + 1}/{self.VOCAB_SIZE}: {self.vocab[pair[0]]} + {self.vocab[pair[1]]} -> {self.vocab[idx]} had {count} occurrences")
+            tqdm.write(f"merge {i + 1}/{self.VOCAB_SIZE}: {self.vocab[pair[0]]} + {self.vocab[pair[1]]} -> {self.vocab[idx]} had {count} occurrences")
 
 
         days, hrs, mins, secs = self.calculate_elapsed_time()
@@ -181,7 +213,7 @@ if __name__ == "__main__":
     dataset = load_dataset("polyglots/MADLAD_CulturaX_cleaned", split="train")["text"]
 
     trainer = SinhalaGPETokenizerTrainer(
-        dataset_size=1_000_000,
+        dataset_size=10_000_00,
         vocab_size=5_000,
         dataset=dataset
     )
