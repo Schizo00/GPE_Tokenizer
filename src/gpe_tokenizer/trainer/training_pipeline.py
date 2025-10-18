@@ -225,9 +225,12 @@ class SinhalaGPETokenizerTrainer:
 
         del self.lines # Free up memory
 
+        merge_size = self.VOCAB_SIZE - len(self.vocab)
+        logger.info(f"Training BPE for {merge_size} merges...")
+
         self.merges = {}
 
-        for i in tqdm(range(self.VOCAB_SIZE), desc="Training BPE"):
+        for i in tqdm(range(merge_size), desc="Training BPE"):
             stats = self.get_stats(self.ids_list)
             if not stats:
                 print("No more pairs to merge!")
@@ -278,8 +281,8 @@ if __name__ == "__main__":
     dataset = load_dataset("polyglots/MADLAD_CulturaX_cleaned", split="train")["text"]
 
     trainer = SinhalaGPETokenizerTrainer(
-        dataset_size=5_000_000,
-        vocab_size=16_000,
+        dataset_size=10_000_000,
+        vocab_size=32_000,
         dataset=dataset
     )
     trainer.train()

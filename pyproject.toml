@@ -1,6 +1,6 @@
 [project]
 name = "gpe-tokenizer"
-version = "0.1.0"
+version = "0.1.3"
 description = "Grapheme Pair Encoding Tokenizer for Sinhala Language"
 authors = [
     {name = "Schizo00",email = "naween.k@live.com"}
