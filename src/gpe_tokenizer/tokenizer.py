@@ -310,28 +310,28 @@ class SinhalaGPETokenizer(PreTrainedTokenizer):
 
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
     # from tokenizer import SinhalaGPETokenizer
 
-# Initialize tokenizer for BERT
-tokenizer = SinhalaGPETokenizer(models_dir="src/gpe_tokenizer/models", model_type="bert")
-    
-# Test tokenization
+    # Initialize tokenizer for BERT
+    tokenizer = SinhalaGPETokenizer(models_dir="src/gpe_tokenizer/models", model_type="bert")
+        
+    # Test tokenization
 
-# def test_tokens(text):
-#     encoded = tokenizer(text, return_tensors="pt")
-#     print(f"\nText: {text}")
-#     print(f"Input IDs: {encoded['input_ids']}")
-#     print(f"Decoded: {tokenizer.decode(encoded['input_ids'][0])}")
+    # def test_tokens(text):
+    #     encoded = tokenizer(text, return_tensors="pt")
+    #     print(f"\nText: {text}")
+    #     print(f"Input IDs: {encoded['input_ids']}")
+    #     print(f"Decoded: {tokenizer.decode(encoded['input_ids'][0])}")
 
-sentences = [
-    "මෙය පරීක්ෂා කිරීමකි",
-    "ශ්‍රී ලංකාවේ අගනගරය කොළඹ වේ",
-    "කෘතිම බුද්ධිය යනු අනාගත තාක්ෂණයයි",
-    "සිංහල භාෂාව ලියන රීති ඉගෙන ගන්න",
-    "විද්‍යාගාරය විද්‍යාත්මක පර්යේෂණ සඳහා යොදා ගැනේ",
-    "ශ්‍රී ලංකාව"
-]
+    sentences = [
+        "මෙය පරීක්ෂා කිරීමකි",
+        "ශ්‍රී ලංකාවේ අගනගරය කොළඹ වේ",
+        "කෘතිම බුද්ධිය යනු අනාගත තාක්ෂණයයි",
+        "සිංහල භාෂාව ලියන රීති ඉගෙන ගන්න",
+        "විද්‍යාගාරය විද්‍යාත්මක පර්යේෂණ සඳහා යොදා ගැනේ",
+        "ශ්‍රී ලංකාව"
+    ]
 
-for sent in sentences:
-    tokenizer.visualize_tokens(sent)
+    for sent in sentences:
+        tokenizer.visualize_tokens(sent)
