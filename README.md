@@ -26,6 +26,7 @@
 
 ## Based on the work:
 
+```
 @inproceedings{velayuthan-sarveswaran-2025-egalitarian,
  title = "Egalitarian Language Representation in Language Models: It All Begins with Tokenizers",
  author = "Velayuthan, Menan and
@@ -44,3 +45,4 @@
  url = "https://aclanthology.org/2025.coling-main.400/",
  pages = "5987--5996",
 }
+```
