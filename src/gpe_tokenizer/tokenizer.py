@@ -15,7 +15,7 @@ class SinhalaGPETokenizer(PreTrainedTokenizer):
     
     def __init__(
         self,
-        models_dir="src/gpe_tokenizer/models",
+        models_dir="gpe_tokenizer/models",
         model_type="llama",  # "llama", "bert", or "gpt"
         unk_token=None,
         bos_token=None,
