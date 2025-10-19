@@ -4,6 +4,18 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from transformers import PreTrainedTokenizer
 
+# For modern Python resource access, with pkg_resources fallback
+try:
+    from importlib.resources import files
+    HAS_IMPORTLIB_RESOURCES = True
+except ImportError:
+    HAS_IMPORTLIB_RESOURCES = False
+    try:
+        import pkg_resources
+        HAS_PKG_RESOURCES = True
+    except ImportError:
+        HAS_PKG_RESOURCES = False
+
 
 class SinhalaGPETokenizer(PreTrainedTokenizer):
     """
@@ -15,7 +27,7 @@ class SinhalaGPETokenizer(PreTrainedTokenizer):
     
     def __init__(
         self,
-        models_dir="gpe_tokenizer/models",
+        models_dir=None,
         model_type="llama",  # "llama", "bert", or "gpt"
         unk_token=None,
         bos_token=None,
@@ -34,13 +46,38 @@ class SinhalaGPETokenizer(PreTrainedTokenizer):
             model_type: Type of model ("llama", "bert", "gpt")
             Special tokens can be overridden; defaults are set based on model_type
         """
+        # If no models_dir provided, use package resource path
+        if models_dir is None:
+            try:
+                # Try modern importlib.resources first (Python 3.9+)
+                if HAS_IMPORTLIB_RESOURCES:
+                    package_models = files('gpe_tokenizer') / 'models'
+                    models_dir = str(package_models)
+                # Fallback to pkg_resources
+                elif HAS_PKG_RESOURCES:
+                    models_dir = pkg_resources.resource_filename('gpe_tokenizer', 'models')
+                else:
+                    # Final fallback to relative path from current file
+                    models_dir = Path(__file__).parent / "models"
+            except Exception:
+                # Fallback to relative path from current file
+                models_dir = Path(__file__).parent / "models"
+        
         self.models_dir = Path(models_dir)
         self.model_type = model_type.lower()
-        print(self.models_dir)
-        # Load vocabulary and merges
-        self.vocab = pickle.load(open(self.models_dir / "vocab.pkl", "rb"))
-        self.vocab_re = pickle.load(open(self.models_dir / "vocab_re.pkl", "rb"))
-        self.merges = pickle.load(open(self.models_dir / "merges.pkl", "rb"))
+        print(f"Loading models from: {self.models_dir}")
+        
+        # Load vocabulary and merges with better error handling
+        try:
+            with open(self.models_dir / "vocab.pkl", "rb") as f:
+                self.vocab = pickle.load(f)
+            with open(self.models_dir / "vocab_re.pkl", "rb") as f:
+                self.vocab_re = pickle.load(f)
+            with open(self.models_dir / "merges.pkl", "rb") as f:
+                self.merges = pickle.load(f)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Model files not found in {self.models_dir}. Make sure vocab.pkl, vocab_re.pkl, and merges.pkl exist. Error: {e}")
+        
         self.max_id = max(self.vocab.keys())
         
         # Set default special tokens based on model type
