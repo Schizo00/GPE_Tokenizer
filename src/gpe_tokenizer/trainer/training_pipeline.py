@@ -262,7 +262,7 @@ class SinhalaGPETokenizerTrainer:
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
             self.vocab_re[self.vocab[idx]] = idx
 
-            tqdm.write(f"merge {i + 1}/{self.VOCAB_SIZE}: {self.vocab[pair[0]]} + {self.vocab[pair[1]]} -> {self.vocab[idx]} had {count} occurrences")
+            tqdm.write(f"merge {i + 1}/{merge_size}: {self.vocab[pair[0]]} + {self.vocab[pair[1]]} -> {self.vocab[idx]} had {count} occurrences")
 
 
         days, hrs, mins, secs = self.calculate_elapsed_time()
