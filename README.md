@@ -17,6 +17,9 @@
 ### Tokenize
 #### ```tokenizer.tokenize(text)```
 
+### Visualize Tokens
+#### ```tokeinzer.visualize_tokens(text)```
+
 
 
 ## Tokenizer Training Details
